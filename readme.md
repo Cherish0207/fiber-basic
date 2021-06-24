@@ -8,14 +8,14 @@
 - 每个帧的预算时间是 16.66 毫秒 (1 秒/60)
 - 1s 60 帧，所以每一帧分到的时间是 1000/60 ≈ 16 ms。所以我们书写代码时力求不让一帧的工作量超过 16ms
 
-![img](./images/autogivefood.gif)
+![img](https://cherish0207.github.io/images/fiber-basic/autogivefood.gif)
 
 ### life of frame
 
 - 每个帧的开头包括样式计算、布局和绘制
 - 如果某个任务执行时间过长，浏览器会推迟渲染
 
-![img](./images/lifeofframe.png)
+![img](https://cherish0207.github.io/images/fiber-basic/lifeofframe.png)
 
 - 输入事件：优先级最高，以让用户得到最快反馈
 - timers：定时器到时间的回调
@@ -24,6 +24,7 @@
 ## 2.1 [rAF](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/requestAnimationFrame)
 
 `requestAnimationFrame`回调函数会在绘制之前执行
+[github](https://github.com/Cherish0207/fiber-basic/blob/master/1.requestAnimationFrame.html)
 
 ```html
 <!DOCTYPE html>
@@ -78,7 +79,7 @@
 - `requestIdleCallback` 使开发者能够在主事件循环上执行后台和低优先级工作，而不会影-响延迟关键事件，如动画和输入响应
 - 正常帧任务完成后没超过 16ms,说明时间有富余，此时就会执行 `requestIdleCallback` 里注册的任务
 
-![img](./images/cooperativescheduling2.png)
+![img](https://cherish0207.github.io/images/fiber-basic/cooperativescheduling2.png)
 
 ```ts
 window.requestIdleCallback(
@@ -97,6 +98,8 @@ interface IdleDeadline {
   - timeRemaining()，表示当前帧剩余的时间，也可理解为留给任务的时间还有多少
 - options：目前 options 只有一个参数
   - timeout。表示超过这个时间后，如果任务还没执行，则强制执行，不必等待空闲
+
+[github](https://github.com/Cherish0207/fiber-basic/blob/master/2.requestIdleCallback.html)
 
 ```html
 <!DOCTYPE html>
@@ -181,3 +184,118 @@ ps:
 - 不要在空闲时间 idle 操作 dom，引起重新渲染
 - 这个调度方式叫合作式调度,需要浏览器相信用户写的代码
   但是如果用户写代码时,或者执行时间超过给的剩余时间,浏览器没有办法
+
+### 2.3 MessageChannel
+
+- 目前 requestIdleCallback 目前只有 Chrome 支持
+- 所以目前 React 利用 MessageChannel 模拟了 requestIdleCallback，将回调延迟到绘制操作之后执行
+- MessageChannel API 允许我们创建一个新的消息通道，并通过它的两个 MessagePort 属性发送数据
+- MessageChannel 创建了一个通信的管道，这个管道有两个端口，每个端口都可以通过 postMessage 发送数据，而一个端口只要绑定了 onmessage 回调方法，就可以接收从另一个端口传过来的数据
+- MessageChannel 是一个宏任务
+
+![img](https://cherish0207.github.io/images/fiber-basic/phones.png)
+
+```js
+var channel = new MessageChannel();
+//channel.port1
+//channel.port2
+```
+
+```js
+var channel = new MessageChannel();
+var port1 = channel.port1;
+var port2 = channel.port2;
+port1.onmessage = function (event) {
+  console.log("port1收到来自port2的数据：" + event.data);
+};
+port2.onmessage = function (event) {
+  console.log("port2收到来自port1的数据：" + event.data);
+};
+port1.postMessage("发送给port2");
+port2.postMessage("发送给port1");
+```
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+
+  <body>
+    <script>
+      const channel = new MessageChannel();
+      let pendingCallback;
+      let startTime;
+      let timeoutTime;
+      let perFrameTime = 1000 / 60;
+      let timeRemaining = () => perFrameTime - (Date.now() - startTime);
+      channel.port2.onmessage = () => {
+        if (pendingCallback) {
+          pendingCallback({
+            didTimeout: Date.now() > timeoutTime,
+            timeRemaining,
+          });
+        }
+      };
+      window.requestIdleCallback = (callback, options) => {
+        timeoutTime = Date.now() + options.timeout;
+        requestAnimationFrame(() => {
+          startTime = Date.now();
+          pendingCallback = callback;
+          channel.port1.postMessage("hello");
+        });
+        /* startTime = Date.now();
+            setTimeout(() => {
+                callback({ didTimeout: Date.now() > timeoutTime, timeRemaining });
+            }); */
+      };
+
+      function sleep(d) {
+        for (var t = Date.now(); Date.now() - t <= d; );
+      }
+      const works = [
+        () => {
+          console.log("第1个任务开始");
+          sleep(30); //sleep(20);
+          console.log("第1个任务结束");
+        },
+        () => {
+          console.log("第2个任务开始");
+          sleep(30); //sleep(20);
+          console.log("第2个任务结束");
+        },
+        () => {
+          console.log("第3个任务开始");
+          sleep(30); //sleep(20);
+          console.log("第3个任务结束");
+        },
+      ];
+
+      requestIdleCallback(workLoop, { timeout: 60 * 1000 });
+      function workLoop(deadline) {
+        console.log("本帧剩余时间", parseInt(deadline.timeRemaining()));
+        while (
+          (deadline.timeRemaining() > 1 || deadline.didTimeout) &&
+          works.length > 0
+        ) {
+          performUnitOfWork();
+        }
+        if (works.length > 0) {
+          console.log(
+            `只剩下${parseInt(
+              deadline.timeRemaining()
+            )}ms,时间片到了等待下次空闲时间的调度`
+          );
+          requestIdleCallback(workLoop, { timeout: 60 * 1000 });
+        }
+      }
+      function performUnitOfWork() {
+        works.shift()();
+      }
+    </script>
+  </body>
+</html>
+```
