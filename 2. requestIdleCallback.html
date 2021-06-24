@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>requestIdleCallback</title>
+  </head>
+  <body>
+    <script>
+      // 在js里实现睡眠功能
+      function sleep(delay) {
+        for (var t = Date.now(); Date.now() - t <= delay; );
+      }
+      // 一个个小任务
+      const works = [
+        () => {
+          logger("第1个任务开始");
+          sleep(8);
+          logger("第1个任务结束");
+        },
+        () => {
+          logger("第2个任务开始");
+          sleep(1000); // 一帧16.6ms，因为此任务的执行时间已经超过了16.6ms,所需要把控制权交给浏览器
+          // 剩余时间没执行完requestIdleCallback，则会卡在这里
+          logger("第2个任务结束");
+        },
+        () => {
+          logger("第3个任务开始");
+          sleep(5);
+          logger("第3个任务结束");
+        },
+      ];
+      // 每次取出一个任务执行
+      function performUnitOfWork() {
+        works.shift()();
+      }
+      function logger(content) {
+        console.log(content);
+      }
+      /**
+       * deadline: {timeRemaining, didTimeout}
+       * timeRemaining(): 返回此帧还剩多少时间供用户使用
+       * didTimeout: 此callback任务是否超时
+       */
+      function workLoop(deadline) {
+        logger(`本帧剩余${parseInt(deadline.timeRemaining())}ms`); // 一般是个小于16ms的值
+        while (
+          (deadline.timeRemaining() > 1 || deadline.didTimeout) &&
+          works.length > 0
+        ) {
+          logger(`还剩${parseInt(deadline.timeRemaining())}ms`);
+          performUnitOfWork();
+          logger(`还剩${parseInt(deadline.timeRemaining())}ms`);
+        }
+        // 如果没有剩余时间了,就放弃执行任务控制权,执行权交还给浏览器
+        if (works.length > 0) {
+          logger(`还剩${parseInt(deadline.timeRemaining())}ms,时间片到了,等待下次空闲时间的调度`);
+          requestIdleCallback(workLoop);
+        }
+      }
+      /**
+       * 取出workLoop任务执行
+       * 这是一个全局属性/方法
+       * 我作为用户,告诉浏览器,我现在执行callback函数,但是它的优先级比较低,可以在空闲的时候执行callback
+       * timeout: 500: 但是如果到了timeout超时时间了,即使没有空闲时间也得执行，必须马上执行
+       */
+      requestIdleCallback(workLoop, { timeout: 500 });
+    </script>
+  </body>
+</html>
