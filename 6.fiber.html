@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>rootFiber</title>
+  </head>
+  <body>
+    <script>
+      let A1 = { type: "div", key: "A1" };
+      let B1 = { type: "div", key: "B1", return: A1 };
+      let B2 = { type: "div", key: "B2", return: A1 };
+      let C1 = { type: "div", key: "C1", return: B1 };
+      let C2 = { type: "div", key: "C2", return: B1 };
+      A1.child = B1;
+      B1.sibling = B2;
+      B1.child = C1;
+      C1.sibling = C2;
+    </script>
+    <script>
+      let rootFiber = A1;
+      let nextUnitOfWork = null; //下一个工作单元
+      let start = Date.now();
+      //render工作循环
+      function sleep(delay) {
+        for (var t = Date.now(); Date.now() - t <= delay; );
+      }
+      function workLoop(deadline) {
+        while (
+          (deadline.timeRemaining() > 1 || deadline.didTimeout) &&
+          nextUnitOfWork
+        ) {
+          nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+        }
+        if (nextUnitOfWork) {
+          requestIdleCallback(workLoop, { timeout: 1000 });
+        } else {
+          console.log(Date.now() - start, "render阶段结束");
+        }
+      }
+      function performUnitOfWork(fiber) {
+        beginWork(fiber);
+        if (fiber.child) {
+          return fiber.child; //如果子节点就返回第一个子节点
+        }
+        while (fiber) {
+          //如果没有子节点说明当前节点已经完成了渲染工作
+          completeUnitOfWork(fiber); //可以结束此fiber的渲染了
+          if (fiber.sibling) {
+            return fiber.sibling; //如果它有弟弟就返回弟弟
+          }
+          fiber = fiber.return; //如果没有弟弟让爸爸完成，然后找叔叔
+        }
+      }
+      function beginWork(fiber) {
+        sleep(20);
+        console.log("beginWork", fiber.key);
+        //fiber.stateNode = document.createElement(fiber.type);
+      }
+      function completeUnitOfWork(fiber) {
+        console.log("completeUnitOfWork", fiber.key);
+      }
+      nextUnitOfWork = rootFiber;
+      requestIdleCallback(workLoop, { timeout: 1000 });
+    </script>
+  </body>
+</html>

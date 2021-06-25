@@ -12,16 +12,23 @@
 
 ### life of frame
 
-- 每个帧的开头包括样式计算、布局和绘制
-- 如果某个任务执行时间过长，浏览器会推迟渲染
+> 每个帧的开头包括样式计算、布局和绘制,如果某个任务执行时间过长，浏览器会推迟渲染
 
 ![img](https://cherish0207.github.io/images/fiber-basic/lifeofframe.png)
 
-- 输入事件：优先级最高，以让用户得到最快反馈
-- timers：定时器到时间的回调
-- GUI 渲染和 script 引擎是同一个线程，互斥，是性能优化的基础
+浏览器在⼀帧内都要:
 
-## 2.1 [rAF](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/requestAnimationFrame)
+- 处理⽤户输⼊事件:优先级最高，以让用户得到最快反馈
+- Javascript 执⾏:定时器到时间的回调 timers 等
+- requestAnimation 调⽤
+- 布局 Layout
+- 绘制 Paint
+
+ps.GUI 渲染和 script 引擎是同一个线程，互斥，是性能优化的基础
+
+## 帧
+
+### [rAF](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/requestAnimationFrame)
 
 `requestAnimationFrame`回调函数会在绘制之前执行
 [github](https://github.com/Cherish0207/fiber-basic/blob/master/1.requestAnimationFrame.html)
@@ -73,7 +80,7 @@
 </html>
 ```
 
-### 2.2 [requestIdleCallback](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/requestIdleCallback)
+### [requestIdleCallback](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/requestIdleCallback)
 
 - 我们希望快速响应用户，让用户觉得够快，不能阻塞用户的交互
 - `requestIdleCallback` 使开发者能够在主事件循环上执行后台和低优先级工作，而不会影-响延迟关键事件，如动画和输入响应
@@ -185,7 +192,7 @@ ps:
 - 这个调度方式叫合作式调度,需要浏览器相信用户写的代码
   但是如果用户写代码时,或者执行时间超过给的剩余时间,浏览器没有办法
 
-### 2.3 MessageChannel
+### MessageChannel
 
 - 目前 requestIdleCallback 目前只有 Chrome 支持
 - 所以目前 React 利用 MessageChannel 模拟了 requestIdleCallback，将回调延迟到绘制操作之后执行
@@ -300,7 +307,7 @@ port2.postMessage("发送给port1");
 </html>
 ```
 
-### 2.4 单链表
+## 单链表
 
 - 单链表是一种链式存取的数据结构
 - 链表中的数据是以节点来表示的，每个节点的构成：元素 + 指针(指示后继元素存储位置)，元素就是存储数据的存储单元，指针就是连接每个节点的地址
@@ -360,14 +367,15 @@ queue.forceUpdate();
 console.log(queue.baseState);
 ```
 
-## 3.Fiber 历史
+## Fiber 历史
 
-### 3.1 Fiber 之前的协调
+### Fiber 之前的协调
 
 - React 会递归比对 VirtualDOM 树，找出需要变动的节点，然后同步更新它们。这个过程 React 称为 Reconcilation(协调)。
 - 在 Reconcilation 期间，React 会一直占用着浏览器资源，一则会导致用户触发的事件得不到响应, 二则会导致掉帧，用户可能会感觉到卡顿。
 
 [github](https://github.com/Cherish0207/fiber-basic/blob/master/5.Fiber前的深度递归遍历.js)
+
 ```js
 // fiber 之前是什么样的?为什么需要 fiber?
 let root = {
@@ -409,4 +417,258 @@ walk(root);
  * 1.执行栈会越来越深
  * 2.而且不能中断,因为中断后再想恢复就非常难了
  */
+```
+
+### Fiber 是什么
+
+> 我们可以通过某些调度策略合理分配 CPU 资源，从而提高用户的响应速度
+> 通过 Fiber 架构，让自己的 Reconcilation 过程变成可被中断。 适时让出 CPU 执行权，让浏览器及时响应用户交互
+
+```js
+type Fiber = {
+  //类型
+  type: any,
+  //父节点
+  return: Fiber,
+  // 指向第一个子节点
+  child: Fiber,
+  // 指向下一个弟弟
+  sibling: Fiber,
+};
+```
+
+#### Fiber 是一个执行单元
+
+> 每次执行完一个执行单元, React 就会检查现在还剩多少时间，如果没有时间就将控制权让出去
+
+#### Fiber 是一种数据结构
+
+> React 目前的做法是使用链表, 每个 VirtualDOM 节点内部表示为一个 Fiber
+
+![img](https://cherish0207.github.io/images/fiber-basic/fiberflow.png)
+![img](https://cherish0207.github.io/images/fiber-basic/fiberconstructor.png)
+
+### Fiber 执行阶段
+
+- 每次渲染有两个阶段：Reconciliation(协调\render 阶段)和 Commit(提交阶段)
+- 协调阶段: 可以认为是 Diff 阶段, 这个阶段可以被中断, 这个阶段会找出所有节点变更，例如节点新增、删除、属性变更等等, 这些变更 React 称之为副作用(Effect)
+- 提交阶段: 将上一个阶段计算出来的需要处理的副作用(Effects)一次性执行了。这个阶段必须同步执行，不能被打断
+
+#### render 阶段
+
+- render 阶段会构建 fiber 树
+
+```js
+let A1 = { type: "div", key: "A1" };
+let B1 = { type: "div", key: "B1", return: A1 };
+let B2 = { type: "div", key: "B2", return: A1 };
+let C1 = { type: "div", key: "C1", return: B1 };
+let C2 = { type: "div", key: "C2", return: B1 };
+A1.child = B1;
+B1.sibling = B2;
+B1.child = C1;
+C1.sibling = C2;
+module.exports = A1;
+```
+
+#### 遍历规则
+
+- 从顶点开始遍历
+- 如果有第一个儿子，先遍历第一个儿子
+- 如果没有第一个儿子，标志着此节点遍历完成
+- 如果有弟弟遍历弟弟
+- 如果有没有下一个弟弟，返回父节点标识完成父节点遍历，如果有叔叔遍历叔叔
+- 没有父节点遍历结束
+
+* 遍历规则
+* 1.下一个节点:先ル子,后弟弟,再叔叔
+* 2.自己所有子节点完成后自己完成
+
+- 先儿子，后弟弟，再叔叔,辈份越小越优先
+- 什么时候一个节点遍历完成? 没有子节点，或者所有子节点都遍历完成了
+- 没爹了就表示全部遍历完成了
+
+![img](https://cherish0207.github.io/images/fiber-basic/fiberconstructortranverse3.png)
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>rootFiber</title>
+  </head>
+  <body>
+    <script>
+      let A1 = { type: "div", key: "A1" };
+      let B1 = { type: "div", key: "B1", return: A1 };
+      let B2 = { type: "div", key: "B2", return: A1 };
+      let C1 = { type: "div", key: "C1", return: B1 };
+      let C2 = { type: "div", key: "C2", return: B1 };
+      A1.child = B1;
+      B1.sibling = B2;
+      B1.child = C1;
+      C1.sibling = C2;
+    </script>
+    <script>
+      let rootFiber = A1;
+      let nextUnitOfWork = null; //下一个工作单元
+      let start = Date.now();
+      //render工作循环
+      function sleep(delay) {
+        for (var t = Date.now(); Date.now() - t <= delay; );
+      }
+      function workLoop(deadline) {
+        while (
+          (deadline.timeRemaining() > 1 || deadline.didTimeout) &&
+          nextUnitOfWork
+        ) {
+          nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+        }
+        if (nextUnitOfWork) {
+          requestIdleCallback(workLoop, { timeout: 1000 });
+        } else {
+          console.log(Date.now() - start, "render阶段结束");
+        }
+      }
+      function performUnitOfWork(fiber) {
+        beginWork(fiber);
+        if (fiber.child) {
+          return fiber.child; //如果子节点就返回第一个子节点
+        }
+        while (fiber) {
+          //如果没有子节点说明当前节点已经完成了渲染工作
+          completeUnitOfWork(fiber); //可以结束此fiber的渲染了
+          if (fiber.sibling) {
+            return fiber.sibling; //如果它有弟弟就返回弟弟
+          }
+          fiber = fiber.return; //如果没有弟弟让爸爸完成，然后找叔叔
+        }
+      }
+      function beginWork(fiber) {
+        sleep(20);
+        console.log("beginWork", fiber.key);
+        //fiber.stateNode = document.createElement(fiber.type);
+      }
+      function completeUnitOfWork(fiber) {
+        console.log("completeUnitOfWork", fiber.key);
+      }
+      nextUnitOfWork = rootFiber;
+      requestIdleCallback(workLoop, { timeout: 1000 });
+    </script>
+  </body>
+</html>
+```
+
+### commit 阶段
+
+- 类比 Git 分支功能,从旧树中 fork 出来一份，在新分支进行添加、删除和更新操作，经过测试后进行提交
+  ![img](https://cherish0207.github.io/images/fiber-basic/fibercommit.jpg)
+  ![img](https://cherish0207.github.io/images/fiber-basic/fibereffectlist4.png)
+
+```js
+let container = document.getElementById("root");
+let C1 = { type: "div", key: "C1", props: { id: "C1", children: [] } };
+let C2 = { type: "div", key: "C2", props: { id: "C2", children: [] } };
+let B1 = { type: "div", key: "B1", props: { id: "B1", children: [C1, C2] } };
+let B2 = { type: "div", key: "B2", props: { id: "B2", children: [] } };
+let A1 = { type: "div", key: "A1", props: { id: "A1", children: [B1, B2] } };
+
+let nextUnitOfWork = null;
+let workInProgressRoot = null;
+function workLoop() {
+  while (nextUnitOfWork) {
+    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+  }
+  if (!nextUnitOfWork) {
+    //render阶段结束
+    commitRoot();
+  }
+}
+function commitRoot() {
+  let fiber = workInProgressRoot.firstEffect;
+  while (fiber) {
+    console.log(fiber.key); //C1 C2 B1 B2 A1
+    commitWork(fiber);
+    fiber = fiber.nextEffect;
+  }
+  workInProgressRoot = null;
+}
+function commitWork(currentFiber) {
+  currentFiber.return.stateNode.appendChild(currentFiber.stateNode);
+}
+function performUnitOfWork(fiber) {
+  beginWork(fiber);
+  if (fiber.child) {
+    return fiber.child;
+  }
+  while (fiber) {
+    completeUnitOfWork(fiber);
+    if (fiber.sibling) {
+      return fiber.sibling;
+    }
+    fiber = fiber.return;
+  }
+}
+function beginWork(currentFiber) {
+  if (!currentFiber.stateNode) {
+    currentFiber.stateNode = document.createElement(currentFiber.type); //创建真实DOM
+    for (let key in currentFiber.props) {
+      //循环属性赋赋值给真实DOM
+      if (key !== "children" && key !== "key")
+        currentFiber.stateNode.setAttribute(key, currentFiber.props[key]);
+    }
+  }
+  let previousFiber;
+  currentFiber.props.children.forEach((child, index) => {
+    let childFiber = {
+      tag: "HOST",
+      type: child.type,
+      key: child.key,
+      props: child.props,
+      return: currentFiber,
+      effectTag: "PLACEMENT",
+      nextEffect: null,
+    };
+    if (index === 0) {
+      currentFiber.child = childFiber;
+    } else {
+      previousFiber.sibling = childFiber;
+    }
+    previousFiber = childFiber;
+  });
+}
+function completeUnitOfWork(currentFiber) {
+  const returnFiber = currentFiber.return;
+  if (returnFiber) {
+    if (!returnFiber.firstEffect) {
+      returnFiber.firstEffect = currentFiber.firstEffect;
+    }
+    if (currentFiber.lastEffect) {
+      if (returnFiber.lastEffect) {
+        returnFiber.lastEffect.nextEffect = currentFiber.firstEffect;
+      }
+      returnFiber.lastEffect = currentFiber.lastEffect;
+    }
+
+    if (currentFiber.effectTag) {
+      if (returnFiber.lastEffect) {
+        returnFiber.lastEffect.nextEffect = currentFiber;
+      } else {
+        returnFiber.firstEffect = currentFiber;
+      }
+      returnFiber.lastEffect = currentFiber;
+    }
+  }
+}
+console.log(container);
+
+workInProgressRoot = {
+  key: "ROOT",
+  stateNode: container,
+  props: { children: [A1] },
+};
+nextUnitOfWork = workInProgressRoot; //从RootFiber开始，到RootFiber结束
+workLoop();
 ```
