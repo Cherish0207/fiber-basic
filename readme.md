@@ -299,3 +299,114 @@ port2.postMessage("发送给port1");
   </body>
 </html>
 ```
+
+### 2.4 单链表
+
+- 单链表是一种链式存取的数据结构
+- 链表中的数据是以节点来表示的，每个节点的构成：元素 + 指针(指示后继元素存储位置)，元素就是存储数据的存储单元，指针就是连接每个节点的地址
+
+![img](https://cherish0207.github.io/images/fiber-basic/trainlist.png)
+![img](https://cherish0207.github.io/images/fiber-basic/singlelink2.png)
+
+[github](https://github.com/Cherish0207/fiber-basic/blob/master/4.单链表.js)
+
+```js
+class Update {
+  constructor(payload, nextUpdate) {
+    this.payload = payload;
+    this.nextUpdate = nextUpdate;
+  }
+}
+class UpdateQueue {
+  constructor() {
+    this.baseState = null;
+    this.firstUpdate = null;
+    this.lastUpdate = null;
+  }
+  clear() {
+    this.firstUpdate = null;
+    this.lastUpdate = null;
+  }
+  enqueueUpdate(update) {
+    if (this.firstUpdate === null) {
+      this.firstUpdate = this.lastUpdate = update;
+    } else {
+      this.lastUpdate.nextUpdate = update;
+      this.lastUpdate = update;
+    }
+  }
+  forceUpdate() {
+    let currentState = this.baseState || {};
+    let currentUpdate = this.firstUpdate;
+    while (currentUpdate) {
+      let nexState =
+        typeof currentUpdate.payload == "function"
+          ? currentUpdate.payload(currentState)
+          : currentUpdate.payload;
+      currentState = { ...currentState, ...nexState };
+      currentUpdate = currentUpdate.nextUpdate;
+    }
+    this.firstUpdate = this.lastUpdate = null;
+    this.baseState = currentState;
+    return currentState;
+  }
+}
+let queue = new UpdateQueue();
+queue.enqueueUpdate(new Update({ name: "zhufeng" }));
+queue.enqueueUpdate(new Update({ number: 0 }));
+queue.enqueueUpdate(new Update((state) => ({ number: state.number + 1 })));
+queue.enqueueUpdate(new Update((state) => ({ number: state.number + 1 })));
+queue.forceUpdate();
+console.log(queue.baseState);
+```
+
+## 3.Fiber 历史
+
+### 3.1 Fiber 之前的协调
+
+- React 会递归比对 VirtualDOM 树，找出需要变动的节点，然后同步更新它们。这个过程 React 称为 Reconcilation(协调)。
+- 在 Reconcilation 期间，React 会一直占用着浏览器资源，一则会导致用户触发的事件得不到响应, 二则会导致掉帧，用户可能会感觉到卡顿。
+
+[github](https://github.com/Cherish0207/fiber-basic/blob/master/5.Fiber前的深度递归遍历.js)
+```js
+// fiber 之前是什么样的?为什么需要 fiber?
+let root = {
+  key: "A1",
+  children: [
+    {
+      key: "B1",
+      children: [
+        {
+          key: "C1",
+          children: [],
+        },
+        {
+          key: "C2",
+          children: [],
+        },
+      ],
+    },
+    {
+      key: "B2",
+      children: [],
+    },
+  ],
+};
+function walk(element) {
+  doWork(element);
+  element.children.forEach(walk);
+}
+
+function doWork(element) {
+  console.log(element.key);
+}
+walk(root);
+/**
+ * 遍历完一个子节点后，如果先遍历兄弟节点-->广度,如果先遍历子节点-->深度
+ * A1 B1 C1 C2 B2
+ *
+ *  这种遍历递归调用,
+ * 1.执行栈会越来越深
+ * 2.而且不能中断,因为中断后再想恢复就非常难了
+ */
+```
